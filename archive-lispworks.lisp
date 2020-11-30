@@ -1,3 +1,7 @@
+(defpackage :cl-nntp.archive-lispworks
+  (:use :cl )
+  (:export ))
+(in-package :cl-nntp.archive-lispworks)
 
 (defun archive-article (client message group target)
   (let* ((target (parse-namestring target))
@@ -31,3 +35,15 @@
                                'archiver
                                args))
           'vector))
+
+
+(defmacro comment (&body body)
+  (declare (ignore body))
+  nil)
+
+(comment ;; example-usage
+ (defparameter *workers* (start-workers 16 "news.gmane.io" "gmane.lisp.lispworks.general" "/tmp/gmane-archive/"))
+
+ (loop for x = 0 then (mod (1+ x) (length *workers*))
+       for msg in (cl-nntp:listgroup "gmane.lisp.lispworks.general" *client*)
+       collect (mp:process-send (elt *workers* x) msg)))
