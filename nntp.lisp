@@ -1,10 +1,5 @@
 (in-package #:com.liotev.nntp)
 
-(defparameter *default-client* nil
-  "This client will be used in all functions that accept a client as an
-optional parameter, and this optional parameter is not supplied or
-nil.")
-
 (defparameter *cache-authinfo-p* nil
   "If t, the user name and password will be saved in the client
 object.")
@@ -83,7 +78,6 @@ client."
                      (make-new-client host port stream server-greeting
                                       tls-p)))
                 (register-client new-client)
-                (setf *default-client* new-client)
                 (when auth (authenticate-client new-client)))
               (progn
                 (reset-client client host port stream server-greeting
@@ -121,7 +115,7 @@ client."
 
 
 (defun do-command
-    (command &optional (client *default-client*)
+    (command client
      &key (reconnect t reconnect-supplied-p))
   "Sends the command to the server. In case of a timeout message from
 the server, a reconnect will be attempted in the following cases:
@@ -150,7 +144,7 @@ In case of another error, a reconnect will be attempted if
   (when (find-restart 'reconnect)
     (invoke-restart 'reconnect)) )
 
-(defun send-command (command  &optional (client *default-client*))
+(defun send-command (command client)
   "Sends the command to the server."
   (setf (client-last-command client) command)
   (restart-case
@@ -177,7 +171,7 @@ In case of another error, a reconnect will be attempted if
     t))
 
 
-(defun group (group-name &optional (client *default-client*))
+(defun group (group-name client)
   "The GROUP nntp command.
 Syntax
   GROUP group
@@ -195,7 +189,29 @@ Parameters
   (setf (client-group client) group-name)
   (do-command (str "group " group-name) client))
 
-(defun article (&optional (client *default-client*)
+(defun listgroup (group-name client)
+  "The LISTGROUP nntp command.
+Syntax
+  LISTGROUP group
+
+Responses
+  211 number low high group  Group successfully selected
+  411                        No such newsgroup
+
+Parameters
+  group     Name of newsgroup
+  number    Estimated number of articles in the group
+  low       Reported low water mark
+  high      Reported high water mark
+"
+  (setf (client-group client) group-name)
+  (let ((result (do-command (str "listgroup " group-name) client)))
+    (values (mapcar (lambda (it)
+                      (parse-integer it :junk-allowed t))
+                    (get-multi-line-response client))
+            result)))
+
+(defun article (client
                 &key article-number article-id)
   "Retreives an article.
 Syntax
@@ -229,8 +245,7 @@ Parameters
   (when (string= "220" (client-status-code client))
     (get-block-response client)))
 
-(defun head (&optional (client *default-client*)
-             &key article-number article-id)
+(defun head (client &key article-number article-id)
   "Retreives the article headers.
  Syntax
    HEAD message-id
@@ -258,8 +273,7 @@ Parameters
   (when (string= "221" (client-status-code client))
     (get-block-response client)))
 
-(defun body (&optional (client *default-client*)
-             &key article-number article-id)
+(defun body (client &key article-number article-id)
   "Retreives the article body
 Syntax
   BODY message-id
@@ -292,8 +306,7 @@ Parameters
   (when (string= "222" (client-status-code client))
     (get-block-response client)))
 
-(defun stat (&optional(client *default-client*)
-             &key article-number article-id)
+(defun stat (client &key article-number article-id)
   "Determines if an article exists, or the message
 id of the article.
 
@@ -326,7 +339,7 @@ Parameters
   (article-command "stat" client :article-number article-number
                    :article-id article-id))
 
-(defun capabilities (&optional (client *default-client*))
+(defun capabilities (client)
   "Lists the capabilities of the server.
 Syntax
   CAPABILITIES [keyword]
@@ -336,18 +349,18 @@ Responses
 "
   (block-command "CAPABILITIES" (list "101") client))
 
-(defun help (&optional (client *default-client*))
+(defun help (client)
   (block-command "help" (list "100") client))
 
 (defun block-command (command valid-codes
-                      &optional (client *default-client*))
+                     client)
   "Sends a command that expects a block and retreives the block
 response."
   (do-command command client)
   (when (find (client-status-code client) valid-codes :test #'string=)
     (get-block-response client)))
 
-(defun article-command (command &optional (client *default-client*)
+(defun article-command (command client
                         &key article-number article-id)
   "Performs an articla related command. Can be one of 'ARTICLE', 'HEAD',
 'BODY', 'STAT'."
@@ -363,13 +376,12 @@ response."
                      :article-id article-id)
         (do-command full-command client))))
 
-(defun set-article (&optional(client *default-client*)
-                    &key article-number article-id)
+(defun set-article (client &key article-number article-id)
   "Sets the article in the client"
   (setf (client-article-number client) article-number
         (client-article-id client) article-id))
 
-(defun get-status (&optional (client *default-client*))
+(defun get-status (client)
   "Reads the status line of the server response, retrurn status code and
 status message."
   (let ((line (client-read-line client)))
@@ -384,7 +396,16 @@ status message."
             (values status-code status-message)))
         (error "No response from the server"))))
 
-(defun authinfo (user pass &optional (client *default-client*))
+(defun get-multi-line-response (client)
+  (loop for line = (cl-nntp::client-read-line client)
+        until (string= line #.(coerce #(#\. #\return) 'string))
+        collect
+        (if (and (> (length line) 2)
+                 (string= ".." line :end2 2))
+            (subseq line 1)
+          line)))
+
+(defun authinfo (user pass client)
   "Authenticates the client."
   (when (null client) (error "Can not authenticate NIL client"))
   (when *cache-authinfo-p*
@@ -411,28 +432,28 @@ status message."
         (user (client-user client)))
     (if user (str user "@" name) name)))
 
-(defun authinfo-user (user &optional (client *default-client*))
+(defun authinfo-user (user client)
   "Sends the 'authinfo user' command."
   (let ((command (str "AUTHINFO USER " user)))
     (client-write-line command client)
     (get-status client)))
 
-(defun authinfo-pass (pass &optional (client *default-client*))
+(defun authinfo-pass (pass client)
   "Sends the 'authinfo pass' command."
   (let ((command (str "AUTHINFO PASS " pass)))
     (client-write-line command client)
     (get-status client)))
 
-(defun date (&optional (client *default-client*))
+(defun date (client)
   (do-command "date" client))
 
-(defun last-article (&optional (client *default-client*))
+(defun last-article (client)
   (do-command "last" client))
 
-(defun next-article (&optional (client *default-client*))
+(defun next-article (client)
   (do-command "next" client))
 
-(defun get-block-response (&optional (client *default-client*))
+(defun get-block-response (client)
   "Reads a block response."
   (let ((stream (client-stream client)))
     (with-output-to-string (s)
@@ -453,7 +474,7 @@ status message."
       status-code
       nil))
 
-(defun disconnect-client (&optional (client *default-client*))
+(defun disconnect-client (client)
   (let ((stream (client-stream client)))
     (when (or (null stream)
               (not (open-stream-p stream)))
@@ -466,13 +487,11 @@ status message."
         (setf (client-stream client) nil))
     client))
 
-(defun destroy-client (&optional (client *default-client*))
+(defun destroy-client (client)
   (disconnect-client client)
-  (setf *clients* (delete client *clients*))
-  (when (eq *default-client* client)
-    (setf *default-client* (car *clients*))))
+  (setf *clients* (delete client *clients*)))
 
-(defun reconnect-client (&optional (client *default-client*))
+(defun reconnect-client (client)
   (connect (client-host client) (client-port client) client)
   (when (client-group client)
     (let ((command (str "group " (client-group client))))

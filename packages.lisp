@@ -19,7 +19,7 @@
            #:capabilities
            #:date
            #:quit
-           ;; #:listgroup
+           #:listgroup
            ;; #:mode-reader
            ;; #:list
            ;; #:newsgroups
