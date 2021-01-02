@@ -6,7 +6,8 @@
 (defpackage #:com.liotev.nntp
   (:nicknames #:cl-nntp #:nntp)
   (:use #:cl #:split-sequence #:com.liotev.nntp.utils)
-  (:export #:connect
+  (:export #:*debug*
+           #:connect
            #:group
            #:article
            #:head

@@ -26,6 +26,8 @@ form the server.")
 (defparameter *clients* nil
   "A list to hold all clients.")
 
+(defvar *debug* nil)
+
 (defstruct client
   "An nntp client."
   host port last-command status-code status-message
@@ -63,14 +65,16 @@ a timeout message.")
                 &key auth (use-tls nil use-tls-supplied?))
   "Connects to the host. If a client is supplied just reconnects the
 client."
-  (format t "-> Connecting to ~a:~a~%" host port)
+  (when *debug*
+    (format t "-> Connecting to ~a:~a~%" host port))
   (multiple-value-bind (stream tls-p)
       (if use-tls-supplied?
           (open-stream-to-server host port :use-tls use-tls)
           (open-stream-to-server host port))
     (let ((server-greeting (if tls-p (read-line-tls stream)
                                (read-line stream))))
-      (format t "<- ~a~%" server-greeting)
+      (when *debug*
+        (format t "<- ~a~%" server-greeting))
       (force-output)
       (if (check-status-code (subseq server-greeting 0 3) '("200" "201"))
           (if (null client)
@@ -387,7 +391,8 @@ status message."
   (let ((line (client-read-line client)))
     (if line
         (progn
-          (format t "<- ~A~%" line)
+          (when *debug*
+            (format t "<- ~A~%" line))
           (force-output)
           (let ((status-code (subseq line 0 (position #\space line)))
                 (status-message (subseq line (1+ (position #\space line)))))
@@ -541,7 +546,8 @@ status message."
                                 :start (1- (length line)))
                       line
                       (str line #\newline))))
-    (format t "-> ~a" new-line)
+    (when *debug*
+      (format t "-> ~a" new-line))
     (write-sequence (babel:string-to-octets new-line) 
                     tls-stream)))
 
@@ -555,7 +561,8 @@ status message."
   (if (client-tls-p client)
       (write-line-tls line (client-stream client))
       (progn
-        (format t "-> ~a~%" line)
+        (when *debug*
+          (format t "-> ~a~%" line))
         (write-line (str line #\newline) (client-stream client))))
   (force-output (client-stream client)))
 
